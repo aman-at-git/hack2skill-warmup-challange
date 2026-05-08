@@ -1,0 +1,70 @@
+name: Quality Check
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: ['**']
+
+jobs:
+  quality:
+    name: Code Quality
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        id: eslint
+        run: npx eslint src --format json --output-file eslint-report.json
+        continue-on-error: true
+
+      - name: TypeScript type check
+        id: typecheck
+        run: npm run type-check
+        continue-on-error: true
+
+      - name: Run Vitest tests
+        id: vitest
+        run: npm run test -- --reporter=json --outputFile=vitest-report.json
+        continue-on-error: true
+
+      - name: Build verification
+        id: build
+        run: npm run build
+        continue-on-error: true
+        env:
+          VITE_GEMINI_API_KEY: ${{ secrets.VITE_GEMINI_API_KEY }}
+
+      - name: Upload quality reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: quality-reports
+          path: |
+            eslint-report.json
+            vitest-report.json
+
+      - name: Fail if any check failed
+        if: |
+          steps.eslint.outcome == 'failure' ||
+          steps.typecheck.outcome == 'failure' ||
+          steps.vitest.outcome == 'failure' ||
+          steps.build.outcome == 'failure'
+        run: |
+          echo "One or more quality checks failed:"
+          echo "  ESLint:     ${{ steps.eslint.outcome }}"
+          echo "  TypeScript: ${{ steps.typecheck.outcome }}"
+          echo "  Tests:      ${{ steps.vitest.outcome }}"
+          echo "  Build:      ${{ steps.build.outcome }}"
+          exit 1
